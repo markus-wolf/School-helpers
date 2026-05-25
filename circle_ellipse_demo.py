@@ -1,9 +1,14 @@
 """Interactive circle and ellipse demonstration for middle school students.
 
-Run with:
-    python3 circle_ellipse_demo.py
+Run with (pyenv + .venv):
+    source .venv/bin/activate
+    python circle_ellipse_demo.py
 
-Requires: matplotlib  (pip install matplotlib)
+Setup once:
+    pyenv install -s
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
 """
 
 from __future__ import annotations

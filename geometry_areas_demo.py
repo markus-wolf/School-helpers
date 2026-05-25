@@ -2,10 +2,15 @@
 
 Find x such that the white area equals the green area.
 
-Run with:
-    python3 geometry_areas_demo.py
+Run with (pyenv + .venv):
+    source .venv/bin/activate
+    python geometry_areas_demo.py
 
-Requires: matplotlib  (pip install matplotlib)
+Setup once:
+    pyenv install -s
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
 """
 
 from __future__ import annotations
