@@ -33,6 +33,7 @@ python circle_area_peel_demo.py
 | Circles & ellipses | `python circle_ellipse_demo.py` |
 | Square area puzzle | `python geometry_areas_demo.py` |
 | Circle area (peel) | `python circle_area_peel_demo.py` |
+| Estimate π (Monte Carlo) | `python pi_monte_carlo_demo.py` |
 
 ---
 
@@ -108,6 +109,43 @@ Tracks **r**, circumference **C**, triangle base **b**, height **h**, area **A**
 
 ---
 
+### `pi_monte_carlo_demo.py` — Estimate π with random dots
+
+A circle is inscribed in a square. Throw random dots into the square and count how many land inside the circle — the ratio estimates **π**.
+
+The window is split **2/3 | 1/3** like the peel demo: diagram and controls on the left, live readout and checkboxes on the right.
+
+#### The idea
+
+1. A unit circle sits inside a **2 × 2** square (area **4**).
+2. Each random dot lands somewhere in the square with equal probability.
+3. Dots inside the circle (green) vs outside (red) give the area ratio.
+4. Therefore **π ≈ 4 × (H / N)**, where **H** is hits inside the circle and **N** is total dots thrown.
+
+#### Controls
+
+Each slider row is **slider → text box → label**. Type a number in the dark box and press **Enter** to jump to that value.
+
+| Control | What it does |
+|---------|--------------|
+| **▶ Throw** / **■ Stop** | Play or stop the dot-throwing animation |
+| **Reset** | Clear all dots and restart |
+| **Dots / sec** | How fast dots are thrown (log scale; default **800**) |
+| **Batch size** | Max dots added per animation frame (**1–500**; default **40**) |
+| **Max dots** | Stop automatically after this many dots (**100–200 000**, log scale; default **10 000**) |
+| **Seed** | Random seed for reproducible runs (**0–9999**) |
+| **Show labels** | Toggle square/circle area labels on the diagram |
+| **Show grid** | Toggle background grid |
+| **Fade old dots** | When many dots are on screen, show only the most recent ones (counts still use all dots) |
+
+#### Live readout panel
+
+Tracks **N** (dots thrown), **H** (inside circle), ratio **p = H/N**, estimate **π̂ = 4p**, error **|π̂ − π|**, percent deviation **|π̂ − π| / π**, and the formula **π ≈ 4 × H/N**.
+
+**Concepts:** area ratio, random sampling, Monte Carlo estimation, how more dots improve the estimate.
+
+---
+
 ## Project layout
 
 ```
@@ -117,5 +155,6 @@ School-helpers/
 ├── .python-version
 ├── circle_ellipse_demo.py
 ├── geometry_areas_demo.py
-└── circle_area_peel_demo.py
+├── circle_area_peel_demo.py
+└── pi_monte_carlo_demo.py
 ```
