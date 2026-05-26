@@ -22,15 +22,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle
-from matplotlib.widgets import Button, CheckButtons, Slider
+from matplotlib.widgets import Button, CheckButtons, Slider, TextBox
 
 # ── constants ─────────────────────────────────────────────────────────────────
-_N_MAX              = 150   # max ring count when layer δ/r → 0
+_N_LAYERS_MIN       = 2
+_N_LAYERS_MAX       = 500
+_N_LAYERS_INIT      = 72
+_LOG_N_MIN          = math.log(_N_LAYERS_MIN)
+_LOG_N_SPAN         = math.log(_N_LAYERS_MAX) - _LOG_N_MIN
 _R_INIT             = 2.0
 _R_MIN              = 1.2
 _R_MAX              = 2.8
 _PEEL_INIT          = 0.0
-_LAYER_FRAC_INIT    = 1.0 / 72   # default layer thickness δ/r (≈72 rings)
 _PEEL_STAGES        = 5
 _RING_SEC_DEFAULT   = 0.25
 _RING_SEC_MIN       = 0.01
@@ -51,14 +54,47 @@ _C_PROOF = "#4ADE80"   # formula highlight
 _C_INK   = "#111827"   # text on light control strip
 _C_EDGE  = "#1F2937"   # diagram edges
 
-# layout (figure-normalised coords)
-_CANVAS  = [0.04, 0.34, 0.52, 0.62]
-_RD_BOX  = [0.58, 0.34, 0.38, 0.62]
-_CTRL_BG = [0.03, 0.03, 0.54, 0.27]   # left strip only — under canvas
-_SL_X, _SL_W, _SL_H = 0.06, 0.44, 0.022
-_SL_YS = (0.21, 0.165, 0.12, 0.075)
-_SL_LABELS = ("Sec / ring", "Layer δ/r", "Peel rings", "Radius r")
-_SYM_X, _VAL_X, _DESC_X = 0.07, 0.24, 0.96
+# layout — 2/3 left (canvas + sliders) | 1/3 right (readout + checkboxes)
+_MX, _MY = 0.02, 0.03
+_GUTTER  = 0.012
+_COL_W   = 1.0 - 2 * _MX - _GUTTER
+_LEFT_W  = _COL_W * 2 / 3
+_RIGHT_W = _COL_W / 3
+_LEFT_X  = _MX
+_RIGHT_X = _MX + _LEFT_W + _GUTTER
+_CTRL_H  = 0.27
+_TOP_GAP = 0.012
+_TOP_H   = 1.0 - 2 * _MY - _CTRL_H - _TOP_GAP
+
+_CANVAS   = [_LEFT_X,  _MY + _CTRL_H + _TOP_GAP, _LEFT_W,  _TOP_H]
+_CTRL_BG  = [_LEFT_X,  _MY,                     _LEFT_W,  _CTRL_H]
+_RD_BOX   = [_RIGHT_X, _MY + _CTRL_H + _TOP_GAP, _RIGHT_W, _TOP_H]
+_CTRL_CHK = [_RIGHT_X, _MY,                     _RIGHT_W, _CTRL_H]
+
+# control row: [slider][text box][label]  (labels right-aligned)
+_ROW_L = _LEFT_X + 0.030
+_ROW_R = _LEFT_X + _LEFT_W - 0.025
+_SL_GAP = 0.010
+_LBL_COL = 0.088
+_TB_W, _SL_H, _TB_H = 0.070, 0.030, 0.030
+_LBL_FS = 9
+_LBL_X = _ROW_R
+_TB_X = _ROW_R - _LBL_COL - _SL_GAP - _TB_W
+_SL_X = _ROW_L
+_SL_W = _TB_X - _SL_GAP - _SL_X
+_SL_YS = (0.22, 0.175, 0.130, 0.085)   # clear gap above buttons (top ≈ 0.115)
+_SL_LABELS = ("Sec / ring", "Layers", "Peel rings", "Radius r")
+
+# readout typography (narrow 1/3 column)
+_RD_FS_SYM   = 17
+_RD_FS_VAL   = 17
+_RD_FS_SM    = 15
+_RD_FS_DESC  = 8
+_RD_FS_TITLE = 11
+_RD_FS_PROOF = 8.5
+_RD_FS_FORM  = 11
+_RD_FS_CMP   = 7.5
+_SYM_X, _VAL_X, _DESC_X = 0.08, 0.22, 0.97
 # ring fill colours — distinct hues, strong edges (readable when colour vision is limited)
 _RING_COLORS = [
     "#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE",
@@ -71,10 +107,21 @@ def _ring_color(i: int) -> str:
     return _RING_COLORS[i % len(_RING_COLORS)]
 
 
-def _ring_layout(r: float, layer_frac: float) -> tuple[int, float]:
-    """Return (ring count, radial thickness δ) for layer thickness δ/r = layer_frac."""
-    frac = max(min(layer_frac, 1.0), 1.0 / _N_MAX)
-    n = max(1, min(_N_MAX, round(1.0 / frac)))
+def _layers_from_slider(s: float) -> int:
+    """Map slider position ∈ [0, 1] to integer layer count (log scale)."""
+    n = round(math.exp(_LOG_N_MIN + max(0.0, min(1.0, s)) * _LOG_N_SPAN))
+    return max(_N_LAYERS_MIN, min(_N_LAYERS_MAX, n))
+
+
+def _slider_from_layers(n: int) -> float:
+    """Map integer layer count to slider position ∈ [0, 1]."""
+    n = max(_N_LAYERS_MIN, min(_N_LAYERS_MAX, int(n)))
+    return (math.log(n) - _LOG_N_MIN) / _LOG_N_SPAN
+
+
+def _ring_layout(r: float, n_rings: int) -> tuple[int, float]:
+    """Return (ring count, radial thickness δ) for *n_rings* concentric rings."""
+    n = max(_N_LAYERS_MIN, min(_N_LAYERS_MAX, int(round(n_rings))))
     return n, r / n
 
 
@@ -217,11 +264,12 @@ def _peeling_ring_poly(
 fig = plt.figure(figsize=(13, 7.8), facecolor="#F0EEEA")
 fig.canvas.manager.set_window_title("Area of a Circle: Peel the Rings")
 
-# control-strip background (groups sliders + buttons)
+# control-strip background (zorder -1 keeps it behind widgets)
 ctrl_bg = fig.add_axes(_CTRL_BG, zorder=-1)
 ctrl_bg.set_facecolor("#E4E2DC")
 ctrl_bg.set_xticks([])
 ctrl_bg.set_yticks([])
+ctrl_bg.set_navigate(False)
 for _sp in ctrl_bg.spines.values():
     _sp.set_color("#9CA3AF")
     _sp.set_linewidth(1.2)
@@ -251,7 +299,7 @@ rd.add_patch(Rectangle(
     facecolor="#1D4ED8", edgecolor="none", zorder=9,
 ))
 rd.text(0.5, 0.958, "AREA DERIVATION", ha="center", va="center",
-        color="#FFFFFF", fontsize=13, fontweight="bold",
+        color="#FFFFFF", fontsize=_RD_FS_TITLE, fontweight="bold",
         transform=rd.transAxes, family="monospace")
 
 for y, col, lw in [(0.885, "#6B7280", 1.5), (0.555, "#4B5563", 1.0),
@@ -260,104 +308,130 @@ for y, col, lw in [(0.885, "#6B7280", 1.5), (0.555, "#4B5563", 1.0),
                          transform=rd.transAxes, zorder=5))
 
 for y, sym, col, desc in [
-    (0.820, "r", _C_R, "radius of circle"),
-    (0.710, "C", _C_C, "circumference  2πr"),
-    (0.600, "b", _C_B, "triangle base  =  C"),
-    (0.490, "h", _C_H, "triangle height  =  r"),
-    (0.380, "A", _C_A, "area  =  ½ × b × h"),
+    (0.820, "r", _C_R, "radius"),
+    (0.710, "C", _C_C, "circum. 2πr"),
+    (0.600, "b", _C_B, "base = C"),
+    (0.490, "h", _C_H, "height = r"),
+    (0.380, "A", _C_A, "area ½bh"),
 ]:
     rd.text(_SYM_X, y, sym, ha="left", va="center", color=col,
-            fontsize=22, fontweight="bold", transform=rd.transAxes,
+            fontsize=_RD_FS_SYM, fontweight="bold", transform=rd.transAxes,
             family="monospace", zorder=11)
     rd.text(_DESC_X, y, desc, ha="right", va="center", color=_C_LABEL,
-            fontsize=10, transform=rd.transAxes, zorder=11)
+            fontsize=_RD_FS_DESC, transform=rd.transAxes, zorder=11)
 
 _rd_r  = rd.text(_VAL_X, 0.820, "—", ha="left", va="center",
-                 color=_C_R, fontsize=22, fontweight="bold",
+                 color=_C_R, fontsize=_RD_FS_VAL, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 _rd_c  = rd.text(_VAL_X, 0.710, "—", ha="left", va="center",
-                 color=_C_C, fontsize=22, fontweight="bold",
+                 color=_C_C, fontsize=_RD_FS_VAL, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 _rd_b  = rd.text(_VAL_X, 0.600, "—", ha="left", va="center",
-                 color=_C_B, fontsize=22, fontweight="bold",
+                 color=_C_B, fontsize=_RD_FS_VAL, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 _rd_h  = rd.text(_VAL_X, 0.490, "—", ha="left", va="center",
-                 color=_C_H, fontsize=22, fontweight="bold",
+                 color=_C_H, fontsize=_RD_FS_VAL, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 _rd_a  = rd.text(_VAL_X, 0.380, "—", ha="left", va="center",
-                 color=_C_A, fontsize=22, fontweight="bold",
+                 color=_C_A, fontsize=_RD_FS_VAL, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 _rd_n  = rd.text(_VAL_X, 0.318, "—", ha="left", va="center",
-                 color=_C_N, fontsize=20, fontweight="bold",
+                 color=_C_N, fontsize=_RD_FS_SM, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 _rd_d  = rd.text(_VAL_X, 0.268, "—", ha="left", va="center",
-                 color=_C_D, fontsize=20, fontweight="bold",
+                 color=_C_D, fontsize=_RD_FS_SM, fontweight="bold",
                  transform=rd.transAxes, family="monospace", zorder=11)
 
 rd.text(_SYM_X, 0.318, "N", ha="left", va="center", color=_C_N,
-        fontsize=20, fontweight="bold", transform=rd.transAxes,
+        fontsize=_RD_FS_SM, fontweight="bold", transform=rd.transAxes,
         family="monospace", zorder=11)
 rd.text(_DESC_X, 0.318, "ring count", ha="right", va="center", color=_C_LABEL,
-        fontsize=10, transform=rd.transAxes, zorder=11)
+        fontsize=_RD_FS_DESC, transform=rd.transAxes, zorder=11)
 rd.text(_SYM_X, 0.268, "δ", ha="left", va="center", color=_C_D,
-        fontsize=20, fontweight="bold", transform=rd.transAxes,
+        fontsize=_RD_FS_SM, fontweight="bold", transform=rd.transAxes,
         family="monospace", zorder=11)
-rd.text(_DESC_X, 0.268, "layer thick  (× r)", ha="right", va="center",
-        color=_C_LABEL, fontsize=10, transform=rd.transAxes, zorder=11)
+rd.text(_DESC_X, 0.268, "δ = r/N", ha="right", va="center",
+        color=_C_LABEL, fontsize=_RD_FS_DESC, transform=rd.transAxes, zorder=11)
 
 rd.text(0.5, 0.218, "the proof", ha="center", va="center",
-        color=_C_WHITE, fontsize=10, fontweight="bold",
+        color=_C_WHITE, fontsize=_RD_FS_PROOF, fontweight="bold",
         transform=rd.transAxes, zorder=11)
 
 _rd_step1 = rd.text(0.5, 0.178, "peel each ring → straight line",
                     ha="center", va="center", color=_C_WHITE,
-                    fontsize=10, transform=rd.transAxes, zorder=11)
+                    fontsize=_RD_FS_PROOF, transform=rd.transAxes, zorder=11)
 _rd_step2 = rd.text(0.5, 0.138, "stack lines → triangle",
                     ha="center", va="center", color=_C_WHITE,
-                    fontsize=10, transform=rd.transAxes, zorder=11)
+                    fontsize=_RD_FS_PROOF, transform=rd.transAxes, zorder=11)
 _rd_formula = rd.text(
     0.5, 0.095,
     "A = ½ × 2πr × r  =  πr²",
     ha="center", va="center", color=_C_PROOF,
-    fontsize=15, fontweight="bold", transform=rd.transAxes,
+    fontsize=_RD_FS_FORM, fontweight="bold", transform=rd.transAxes,
     family="monospace", zorder=11,
 )
 _rd_area_cmp = rd.text(0.5, 0.048, "", ha="center", va="center",
-                       color=_C_LABEL, fontsize=10, transform=rd.transAxes,
+                       color=_C_LABEL, fontsize=_RD_FS_CMP, transform=rd.transAxes,
                        family="monospace", zorder=11)
 
-# ── sliders (labels in figure coords — avoids matplotlib clipping them) ───────
+# ── sliders + text boxes (labels sit to the right of each text box) ───────────
 for _lbl, _y in zip(_SL_LABELS, _SL_YS):
-    fig.text(_SL_X, _y + _SL_H + 0.006, _lbl,
-             transform=fig.transFigure, ha="left", va="bottom",
-             fontsize=10, fontweight="bold", color=_C_INK)
+    fig.text(_LBL_X, _y + _SL_H / 2, _lbl,
+             transform=fig.transFigure, ha="right", va="center",
+             fontsize=_LBL_FS, fontweight="bold", color=_C_INK)
 
-ax_speed = fig.add_axes([_SL_X, _SL_YS[0], _SL_W, _SL_H])
-ax_thick = fig.add_axes([_SL_X, _SL_YS[1], _SL_W, _SL_H])
-ax_peel  = fig.add_axes([_SL_X, _SL_YS[2], _SL_W, _SL_H])
-ax_rad   = fig.add_axes([_SL_X, _SL_YS[3], _SL_W, _SL_H])
+ax_speed    = fig.add_axes([_SL_X, _SL_YS[0], _SL_W, _SL_H])
+ax_tb_speed = fig.add_axes([_TB_X, _SL_YS[0], _TB_W, _TB_H])
+ax_layers    = fig.add_axes([_SL_X, _SL_YS[1], _SL_W, _SL_H])
+ax_tb_layers = fig.add_axes([_TB_X, _SL_YS[1], _TB_W, _TB_H])
+ax_peel     = fig.add_axes([_SL_X, _SL_YS[2], _SL_W, _SL_H])
+ax_tb_peel  = fig.add_axes([_TB_X, _SL_YS[2], _TB_W, _TB_H])
+ax_rad      = fig.add_axes([_SL_X, _SL_YS[3], _SL_W, _SL_H])
+ax_tb_r     = fig.add_axes([_TB_X, _SL_YS[3], _TB_W, _TB_H])
 
 sl_speed = Slider(ax_speed, "", _RING_SEC_MIN, _RING_SEC_MAX,
                   valinit=_RING_SEC_DEFAULT, color="#7C3AED", track_color="#6B7280")
-sl_thick = Slider(ax_thick, "", 0.0, 1.0, valinit=_LAYER_FRAC_INIT,
-                  color="#DB2777", track_color="#6B7280")
+sl_layers = Slider(ax_layers, "", 0.0, 1.0,
+                   valinit=_slider_from_layers(_N_LAYERS_INIT),
+                   color="#DB2777", track_color="#6B7280")
 sl_peel = Slider(ax_peel, "", 0.0, 1.0, valinit=_PEEL_INIT,
                  color="#2563EB", track_color="#6B7280")
 sl_r    = Slider(ax_rad,  "", _R_MIN, _R_MAX, valinit=_R_INIT,
                  color="#0284C7", track_color="#6B7280")
 
-for _sax, _sl in zip((ax_speed, ax_thick, ax_peel, ax_rad),
-                     (sl_speed, sl_thick, sl_peel, sl_r)):
+_TB_BG, _TB_HOVER = "#1E293B", "#334155"
+tb_speed = TextBox(ax_tb_speed, "", initial=f"{_RING_SEC_DEFAULT:.3f}",
+                   color=_TB_BG, hovercolor=_TB_HOVER)
+tb_layers = TextBox(ax_tb_layers, "", initial=str(_N_LAYERS_INIT),
+                    color=_TB_BG, hovercolor=_TB_HOVER)
+tb_peel  = TextBox(ax_tb_peel,  "", initial=f"{_PEEL_INIT:.3f}",
+                   color=_TB_BG, hovercolor=_TB_HOVER)
+tb_r     = TextBox(ax_tb_r,     "", initial=f"{_R_INIT:.2f}",
+                   color=_TB_BG, hovercolor=_TB_HOVER)
+_TEXTBOXES = (tb_speed, tb_layers, tb_peel, tb_r)
+
+for _sax, _sl in zip((ax_speed, ax_layers, ax_peel, ax_rad),
+                     (sl_speed, sl_layers, sl_peel, sl_r)):
+    _sax.set_zorder(2)
     _sax.set_facecolor("#E4E2DC")
     _sax.set_xticks([])
-    _sl.valtext.set_color(_C_INK)
-    _sl.valtext.set_fontsize(9)
-    _sl.valtext.set_fontweight("bold")
+    _sl.valtext.set_visible(False)
+
+for _ax in (ax_tb_speed, ax_tb_layers, ax_tb_peel, ax_tb_r):
+    _ax.set_zorder(3)
+
+for _tb in _TEXTBOXES:
+    try:
+        _tb.text_disp.set_color("#F9FAFB")
+        _tb.text_disp.set_fontsize(10)
+        _tb.text_disp.set_fontfamily("monospace")
+    except AttributeError:
+        pass
 
 
 def _anim_step() -> float:
     """Peel-slider advance per animation tick for the current sec/ring setting."""
-    n_rings, _ = _ring_layout(sl_r.val, sl_thick.val)
+    n_rings, _ = _ring_layout(sl_r.val, _layers_from_slider(sl_layers.val))
     ticks_per_ring = sl_speed.val * 1000.0 / _ANIM_TICK_MS
     return 1.0 / (n_rings * ticks_per_ring)
 
@@ -366,37 +440,62 @@ ax_btn_reset = fig.add_axes([_SL_X + 0.135, 0.035, 0.12, 0.042])
 btn_play  = Button(ax_btn_play,  "▶  Peel",   color="#BFDBFE", hovercolor="#93C5FD")
 btn_reset = Button(ax_btn_reset, "Reset",      color="#FFFFFF", hovercolor="#E5E7EB")
 for _bax in (ax_btn_play, ax_btn_reset):
+    _bax.set_zorder(2)
     _bax.set_facecolor("#FFFFFF")
     for _sp in _bax.spines.values():
         _sp.set_color("#64748B")
         _sp.set_linewidth(1.5)
 
-# checkboxes — under readout panel, separate box
-_CTRL_CHK = [0.58, 0.03, 0.38, 0.27]
+# checkboxes — right column, bottom third
+_CHK_PAD = 0.02
 chk_bg = fig.add_axes(_CTRL_CHK, zorder=-1)
 chk_bg.set_facecolor("#E4E2DC")
 chk_bg.set_xticks([])
 chk_bg.set_yticks([])
+chk_bg.set_navigate(False)
 for _sp in chk_bg.spines.values():
     _sp.set_color("#9CA3AF")
     _sp.set_linewidth(1.2)
 
-ax_checks = fig.add_axes([0.60, 0.08, 0.34, 0.09])
+ax_checks = fig.add_axes([
+    _RIGHT_X + _CHK_PAD, _MY + 0.015,
+    _RIGHT_W - 2 * _CHK_PAD, _CTRL_H - 0.03,
+])
+ax_checks.set_zorder(2)
 ax_checks.set_facecolor("#E4E2DC")
 checks = CheckButtons(
     ax_checks,
-    ["Show labels", "Show peel hint"],
-    actives=[True, True],
+    ["Show labels", "Show peel hint", "Show outlines"],
+    actives=[True, True, False],
 )
 for _lbl in checks.labels:
     _lbl.set_color(_C_INK)
-    _lbl.set_fontsize(10)
+    _lbl.set_fontsize(9)
     _lbl.set_fontweight("bold")
 
 # ── mutable artists ───────────────────────────────────────────────────────────
 _artists: list = []
 _anim_active = False
-_suppress    = False
+_suppress_tb = False
+
+
+def _textbox_typing() -> bool:
+    return any(tb.capturekeystrokes for tb in _TEXTBOXES)
+
+
+def _sync_textboxes() -> None:
+    """Push slider values into text boxes (never while a box has focus)."""
+    pairs = (
+        (tb_speed, f"{sl_speed.val:.3f}"),
+        (tb_layers, str(_layers_from_slider(sl_layers.val))),
+        (tb_peel,  f"{sl_peel.val:.3f}"),
+        (tb_r,     f"{sl_r.val:.2f}"),
+    )
+    for tb, s in pairs:
+        if tb.capturekeystrokes or tb.text == s:
+            continue
+        tb.text_disp.set_text(s)
+        tb.cursor_index = len(s)
 
 
 def _clear() -> None:
@@ -405,9 +504,9 @@ def _clear() -> None:
     _artists.clear()
 
 
-def _draw(r: float, peel: float, layer_frac: float,
-          show_labels: bool, show_hint: bool) -> None:
-    n_rings, dr = _ring_layout(r, layer_frac)
+def _draw(r: float, peel: float, n_layers: int,
+          show_labels: bool, show_hint: bool, show_triangle: bool) -> None:
+    n_rings, dr = _ring_layout(r, n_layers)
     circ = 2 * math.pi * r
     area = math.pi * r * r
     bar_h = dr * 0.96
@@ -421,8 +520,9 @@ def _draw(r: float, peel: float, layer_frac: float,
 
     pad_x = circ / 2 + 1.8
     circle_top = cy + r
+    title_y = circle_top + 0.75          # gap above circle for the heading
     ax.set_xlim(-pad_x, pad_x)
-    ax.set_ylim(tri_bottom - 1.4, circle_top + 0.85)
+    ax.set_ylim(tri_bottom - 1.4, title_y + 0.45)
 
     n_done = peel * n_rings
 
@@ -495,15 +595,29 @@ def _draw(r: float, peel: float, layer_frac: float,
         ax.add_patch(patch)
         _artists.append(patch)
 
-    # outer outline — hide while a ring is actively opening (avoids flat-top artefact)
-    peeling_now = any(i < n_done < i + 1 for i in range(n_rings))
-    if n_done < n_rings - 0.5 and not peeling_now:
-        outline = Circle(
-            (cx, cy), r, fill=False, edgecolor=_C_EDGE,
-            linewidth=2.0, zorder=6,
+    # outer circle + triangle outlines (same style, toggled together)
+    tri_alpha = 0.45 + 0.55 * min(max(peel, 0.0) / 0.20, 1.0)
+    if show_triangle:
+        circ_kw = dict(
+            fill=False, edgecolor="#DC2626", linewidth=1.4,
+            linestyle="--", alpha=tri_alpha, zorder=9,
         )
+        outline = Circle((cx, cy), r, **circ_kw)
         ax.add_patch(outline)
         _artists.append(outline)
+
+        half_base = circ / 2
+        apex = (cx, tri_top)
+        bl = (cx - half_base, tri_bottom)
+        br = (cx + half_base, tri_bottom)
+        tri_kw = dict(color="#DC2626", lw=1.4, ls="--", alpha=tri_alpha,
+                      zorder=9, solid_capstyle="round")
+        for x0, y0, x1, y1 in ((bl[0], bl[1], apex[0], apex[1]),
+                               (br[0], br[1], apex[0], apex[1]),
+                               (bl[0], bl[1], br[0], br[1])):
+            ln, = ax.plot([x0, x1], [y0, y1], **tri_kw)
+            _artists.append(ln)
+    peeling_now = any(i < n_done < i + 1 for i in range(n_rings))
 
     # global peel marker on the circle top (only when no ring is mid-peel)
     if 0.0 < n_done < n_rings and show_hint and not peeling_now:
@@ -548,33 +662,32 @@ def _draw(r: float, peel: float, layer_frac: float,
                                     ha="center", va="top", color=_C_B,
                                     fontsize=14, fontweight="bold", zorder=8))
 
-        # title
+        # title (data coords — fixed gap above circle top)
+        _title_kw = dict(ha="center", va="bottom", fontsize=18,
+                         fontweight="bold", zorder=8)
         if peel < 0.08:
             _artists.append(ax.text(
-                0.5, 0.97, "Circle of radius  r",
-                transform=ax.transAxes, ha="center", va="top",
-                fontsize=18, fontweight="bold", color=_C_INK, zorder=8,
+                cx, title_y, "Circle of radius  r",
+                color=_C_INK, **_title_kw,
             ))
         elif peel > 0.92:
             _artists.append(ax.text(
-                0.5, 0.97, "Same area → triangle!",
-                transform=ax.transAxes, ha="center", va="top",
-                fontsize=18, fontweight="bold", color="#15803D", zorder=8,
+                cx, title_y, "Same area → triangle!",
+                color="#15803D", **_title_kw,
             ))
         else:
             _artists.append(ax.text(
-                0.5, 0.97, "Peeling rings…",
-                transform=ax.transAxes, ha="center", va="top",
-                fontsize=18, fontweight="bold", color="#1D4ED8", zorder=8,
+                cx, title_y, "Peeling rings…",
+                color="#1D4ED8", **_title_kw,
             ))
 
     fig.canvas.draw_idle()
 
 
-def _update_readout(r: float, peel: float, layer_frac: float) -> None:
+def _update_readout(r: float, peel: float, n_layers: int) -> None:
     circ = 2 * math.pi * r
     area = math.pi * r * r
-    n_rings, dr = _ring_layout(r, layer_frac)
+    n_rings, dr = _ring_layout(r, n_layers)
     frac = dr / r
 
     _rd_r.set_text(f"{r:.2f}")
@@ -596,20 +709,60 @@ def _update_readout(r: float, peel: float, layer_frac: float) -> None:
         _rd_step2.set_color(_C_PROOF)
 
     _rd_area_cmp.set_text(
-        f"circle area  πr² = {area:.2f}   |   "
-        f"triangle  ½·2πr·r = {0.5 * circ * r:.2f}"
+        f"πr² = {area:.2f}  |  ½·2πr·r = {0.5 * circ * r:.2f}"
     )
 
 
 def _refresh(_=None) -> None:
-    r          = sl_r.val
-    peel       = sl_peel.val
-    layer_frac = sl_thick.val
-    show_labels, show_hint = checks.get_status()
+    r        = sl_r.val
+    peel     = sl_peel.val
+    n_layers = _layers_from_slider(sl_layers.val)
+    show_labels, show_hint, show_triangle = checks.get_status()
+
+    if not _textbox_typing():
+        _sync_textboxes()
 
     _clear()
-    _draw(r, peel, layer_frac, show_labels, show_hint)
-    _update_readout(r, peel, layer_frac)
+    _draw(r, peel, n_layers, show_labels, show_hint, show_triangle)
+    _update_readout(r, peel, n_layers)
+
+
+def _on_tb_speed(text: str) -> None:
+    if _suppress_tb:
+        return
+    try:
+        sl_speed.set_val(max(_RING_SEC_MIN, min(_RING_SEC_MAX, float(text))))
+    except ValueError:
+        _sync_textboxes()
+
+
+def _on_tb_layers(text: str) -> None:
+    if _suppress_tb:
+        return
+    try:
+        n = int(round(float(text)))
+        n = max(_N_LAYERS_MIN, min(_N_LAYERS_MAX, n))
+        sl_layers.set_val(_slider_from_layers(n))
+    except ValueError:
+        _sync_textboxes()
+
+
+def _on_tb_peel(text: str) -> None:
+    if _suppress_tb:
+        return
+    try:
+        sl_peel.set_val(max(0.0, min(1.0, float(text))))
+    except ValueError:
+        _sync_textboxes()
+
+
+def _on_tb_r(text: str) -> None:
+    if _suppress_tb:
+        return
+    try:
+        sl_r.set_val(max(_R_MIN, min(_R_MAX, float(text))))
+    except ValueError:
+        _sync_textboxes()
 
 
 # ── animation ─────────────────────────────────────────────────────────────────
@@ -651,9 +804,14 @@ def _reset(_=None) -> None:
 
 
 # ── wire up ───────────────────────────────────────────────────────────────────
+sl_speed.on_changed(_refresh)
 sl_peel.on_changed(_refresh)
+sl_layers.on_changed(_refresh)
 sl_r.on_changed(_refresh)
-sl_thick.on_changed(_refresh)
+tb_speed.on_submit(_on_tb_speed)
+tb_layers.on_submit(_on_tb_layers)
+tb_peel.on_submit(_on_tb_peel)
+tb_r.on_submit(_on_tb_r)
 checks.on_clicked(_refresh)
 btn_play.on_clicked(_toggle_anim)
 btn_reset.on_clicked(_reset)

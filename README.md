@@ -70,6 +70,8 @@ An interactive puzzle built from two squares inside a larger square **ABCD**.
 
 An animated proof that **A = πr²** by cutting the circle into concentric rings, unrolling each into a straight line, and stacking them into a triangle.
 
+The window is split **2/3 | 1/3**: the left side holds the diagram and controls; the right side holds the live readout (top) and checkboxes (bottom).
+
 #### The idea
 
 1. Start with a full circle of radius **r**, built from coloured concentric rings.
@@ -84,22 +86,25 @@ An animated proof that **A = πr²** by cutting the circle into concentric rings
 
 #### Controls
 
+Each slider row is laid out as **slider → text box → label**. Type a number in the dark box and press **Enter** to jump to that value.
+
 | Control | What it does |
 |---------|--------------|
 | **Peel rings** | Scrub peel progress (0 = full circle, 1 = fully stacked) |
 | **▶ Peel** / **■ Stop** | Play or stop the automatic peel animation |
 | **Reset** | Return to the full circle |
 | **Sec / ring** | Animation speed per ring (default **0.25 s**; range **0.01–3 s**) |
-| **Layer δ/r** | Ring thickness as a fraction of **r** (0 → many thin rings; 1 → one thick ring) |
+| **Layers** | Number of concentric rings (**2–500**, integers only). The slider uses a **logarithmic** scale; default **72**. More layers → thinner rings → smoother approximation |
 | **Radius r** | Resize the circle |
-| **Show labels** | Toggle dimension arrows (**r**, **2πr**) on the diagram |
+| **Show labels** | Toggle dimension arrows (**r**, **2πr**) and the heading above the diagram |
 | **Show peel hint** | Toggle yellow gap markers and drop guides during peeling |
+| **Show outlines** | Toggle dashed red outlines of the **circle** and **target triangle** (base **2πr**, height **r**). Both stay visible after peeling completes |
 
 #### Live readout panel
 
-Tracks **r**, circumference **C**, triangle base **b**, height **h**, area **A**, ring count **N**, and layer thickness **δ**. The proof steps and formula update as you peel.
+Tracks **r**, circumference **C**, triangle base **b**, height **h**, area **A**, ring count **N**, and ring thickness **δ = r/N**. The proof steps and formula update as you peel.
 
-**Concepts:** circumference, triangle area, visual derivation of **πr²**, how finer rings (smaller **δ/r**) better approximate the true area.
+**Concepts:** circumference, triangle area, visual derivation of **πr²**, how more rings (larger **N**) better approximate the true area.
 
 ---
 
