@@ -129,6 +129,15 @@ def _estimate_pi(hits: int, total: int) -> float:
     return 4.0 * hits / total
 
 
+def _sigma_pct(total: int) -> float:
+    """Expected 1σ of percent deviation |π̂−π|/π at *total* dots (true p = π/4)."""
+    if total <= 0:
+        return float("nan")
+    p = math.pi / 4.0
+    sigma_pi = 4.0 * math.sqrt(p * (1.0 - p) / total)
+    return 100.0 * sigma_pi / math.pi
+
+
 # ── figure ────────────────────────────────────────────────────────────────────
 fig = plt.figure(figsize=(13, 7.8), facecolor="#F0EEEA")
 fig.canvas.manager.set_window_title("Estimate π: Monte Carlo Darts")
@@ -225,6 +234,9 @@ _rd_true = rd.text(_VAL_X, 0.318, f"{math.pi:.6f}", ha="left", va="center",
 _rd_dev = rd.text(_VAL_X, 0.268, "—", ha="left", va="center",
                    color="#C4B5FD", fontsize=_RD_FS_SM, fontweight="bold",
                    transform=rd.transAxes, family="monospace", zorder=11)
+_rd_sigma = rd.text(_VAL_X, 0.218, "—", ha="left", va="center",
+                    color="#A5B4FC", fontsize=_RD_FS_SM, fontweight="bold",
+                    transform=rd.transAxes, family="monospace", zorder=11)
 
 rd.text(_SYM_X, 0.318, "π", ha="left", va="center", color=_C_TRUE,
         fontsize=_RD_FS_SM, fontweight="bold", transform=rd.transAxes,
@@ -236,24 +248,29 @@ rd.text(_SYM_X, 0.268, "%", ha="left", va="center", color="#C4B5FD",
         family="monospace", zorder=11)
 rd.text(_DESC_X, 0.268, "|π̂ − π| / π", ha="right", va="center",
         color=_C_LABEL, fontsize=_RD_FS_DESC, transform=rd.transAxes, zorder=11)
+rd.text(_SYM_X, 0.218, "σ", ha="left", va="center", color="#A5B4FC",
+        fontsize=_RD_FS_SM, fontweight="bold", transform=rd.transAxes,
+        family="monospace", zorder=11)
+rd.text(_DESC_X, 0.218, "expected ±1σ wobble", ha="right", va="center",
+        color=_C_LABEL, fontsize=_RD_FS_DESC, transform=rd.transAxes, zorder=11)
 
-rd.text(0.5, 0.218, "the idea", ha="center", va="center",
+rd.text(0.5, 0.178, "the idea", ha="center", va="center",
         color=_C_WHITE, fontsize=_RD_FS_PROOF, fontweight="bold",
         transform=rd.transAxes, zorder=11)
-_rd_step1 = rd.text(0.5, 0.178, "random dots fill the square",
+_rd_step1 = rd.text(0.5, 0.138, "random dots fill the square",
                     ha="center", va="center", color=_C_WHITE,
                     fontsize=_RD_FS_PROOF, transform=rd.transAxes, zorder=11)
-_rd_step2 = rd.text(0.5, 0.138, "count how many land in the circle",
+_rd_step2 = rd.text(0.5, 0.098, "count how many land in the circle",
                     ha="center", va="center", color=_C_WHITE,
                     fontsize=_RD_FS_PROOF, transform=rd.transAxes, zorder=11)
 _rd_formula = rd.text(
-    0.5, 0.095,
+    0.5, 0.055,
     "π ≈ 4 × (circle area / square area) = 4 × H/N",
     ha="center", va="center", color=_C_PROOF,
     fontsize=_RD_FS_FORM, fontweight="bold", transform=rd.transAxes,
     family="monospace", zorder=11,
 )
-_rd_area_cmp = rd.text(0.5, 0.048, "", ha="center", va="center",
+_rd_area_cmp = rd.text(0.5, 0.018, "", ha="center", va="center",
                        color=_C_LABEL, fontsize=_RD_FS_CMP, transform=rd.transAxes,
                        family="monospace", zorder=11)
 
@@ -447,6 +464,8 @@ def _update_readout() -> None:
         _rd_pi.set_text("—")
         _rd_err.set_text("—")
         _rd_dev.set_text("—")
+        _rd_dev.set_color("#C4B5FD")
+        _rd_sigma.set_text("—")
         _rd_step1.set_color(_C_LABEL)
         _rd_step2.set_color(_C_LABEL)
         _rd_area_cmp.set_text("Press ▶ Throw to start")
@@ -456,6 +475,7 @@ def _update_readout() -> None:
     pi_hat = _estimate_pi(_hits, _total)
     err = abs(pi_hat - math.pi)
     pct_dev = 100.0 * err / math.pi
+    sigma = _sigma_pct(_total)
 
     _rd_n.set_text(f"{_total:,}")
     _rd_h.set_text(f"{_hits:,}")
@@ -463,11 +483,22 @@ def _update_readout() -> None:
     _rd_pi.set_text(f"{pi_hat:.5f}")
     _rd_err.set_text(f"{err:.5f}")
     _rd_dev.set_text(f"{pct_dev:.2f}%")
+    _rd_sigma.set_text(f"±{sigma:.2f}%")
+
+    if pct_dev <= sigma:
+        _rd_dev.set_color(_C_TRUE)
+        wobble = "within normal wobble"
+    elif pct_dev <= 2.0 * sigma:
+        _rd_dev.set_color("#FCD34D")
+        wobble = "typical random fluctuation"
+    else:
+        _rd_dev.set_color(_C_OUT)
+        wobble = "lucky/unlucky streak (~5% of steps)"
 
     _rd_step1.set_color(_C_PROOF if _total >= 20 else _C_WHITE)
     _rd_step2.set_color(_C_PROOF if _hits >= 5 else _C_LABEL)
     _rd_area_cmp.set_text(
-        f"π = {math.pi:.5f}  |  estimate = {pi_hat:.5f}  |  err = {err:.5f}"
+        f"{wobble}  ·  shrinks ~1/√N  ·  estimate can move either way"
     )
 
 

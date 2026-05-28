@@ -33,7 +33,7 @@ _LOG_N_SPAN         = math.log(_N_LAYERS_MAX) - _LOG_N_MIN
 _R_INIT             = 2.0
 _R_MIN              = 1.2
 _R_MAX              = 2.8
-_PEEL_INIT          = 0.0
+_PEEL_INIT          = 0
 _PEEL_STAGES        = 5
 _RING_SEC_DEFAULT   = 0.25
 _RING_SEC_MIN       = 0.01
@@ -83,7 +83,7 @@ _TB_X = _ROW_R - _LBL_COL - _SL_GAP - _TB_W
 _SL_X = _ROW_L
 _SL_W = _TB_X - _SL_GAP - _SL_X
 _SL_YS = (0.22, 0.175, 0.130, 0.085)   # clear gap above buttons (top ≈ 0.115)
-_SL_LABELS = ("Sec / ring", "Layers", "Peel rings", "Radius r")
+_SL_LABELS = ("Sec / ring", "Layers", "layers peeled", "Radius r")
 
 # readout typography (narrow 1/3 column)
 _RD_FS_SYM   = 17
@@ -117,6 +117,28 @@ def _slider_from_layers(n: int) -> float:
     """Map integer layer count to slider position ∈ [0, 1]."""
     n = max(_N_LAYERS_MIN, min(_N_LAYERS_MAX, int(n)))
     return (math.log(n) - _LOG_N_MIN) / _LOG_N_SPAN
+
+
+def _current_layer_count() -> int:
+    """Ring count from the Layers control (single source of truth)."""
+    return _layers_from_slider(sl_layers.val)
+
+
+def _set_peel_slider_max(n: int) -> None:
+    """Match peel slider range 0…N to the current Layers count."""
+    n = max(_N_LAYERS_MIN, min(_N_LAYERS_MAX, int(n)))
+    n_f = float(n)
+    xmax_changed = sl_peel.valmax != n_f
+    if xmax_changed:
+        sl_peel.valmax = n_f
+        sl_peel.ax.set_xlim(0.0, n_f)
+    if sl_peel.val > n_f:
+        sl_peel.set_val(n_f)
+    elif xmax_changed:
+        val = sl_peel.val
+        sl_peel.poly.set_width(val - sl_peel.poly.get_x())
+        sl_peel._handle.set_xdata([val])
+        sl_peel.vline.set_xdata([val, val])
 
 
 def _ring_layout(r: float, n_rings: int) -> tuple[int, float]:
@@ -394,7 +416,7 @@ sl_speed = Slider(ax_speed, "", _RING_SEC_MIN, _RING_SEC_MAX,
 sl_layers = Slider(ax_layers, "", 0.0, 1.0,
                    valinit=_slider_from_layers(_N_LAYERS_INIT),
                    color="#DB2777", track_color="#6B7280")
-sl_peel = Slider(ax_peel, "", 0.0, 1.0, valinit=_PEEL_INIT,
+sl_peel = Slider(ax_peel, "", 0.0, float(_N_LAYERS_INIT), valinit=float(_PEEL_INIT),
                  color="#2563EB", track_color="#6B7280")
 sl_r    = Slider(ax_rad,  "", _R_MIN, _R_MAX, valinit=_R_INIT,
                  color="#0284C7", track_color="#6B7280")
@@ -404,7 +426,7 @@ tb_speed = TextBox(ax_tb_speed, "", initial=f"{_RING_SEC_DEFAULT:.3f}",
                    color=_TB_BG, hovercolor=_TB_HOVER)
 tb_layers = TextBox(ax_tb_layers, "", initial=str(_N_LAYERS_INIT),
                     color=_TB_BG, hovercolor=_TB_HOVER)
-tb_peel  = TextBox(ax_tb_peel,  "", initial=f"{_PEEL_INIT:.3f}",
+tb_peel  = TextBox(ax_tb_peel,  "", initial=str(_PEEL_INIT),
                    color=_TB_BG, hovercolor=_TB_HOVER)
 tb_r     = TextBox(ax_tb_r,     "", initial=f"{_R_INIT:.2f}",
                    color=_TB_BG, hovercolor=_TB_HOVER)
@@ -430,10 +452,9 @@ for _tb in _TEXTBOXES:
 
 
 def _anim_step() -> float:
-    """Peel-slider advance per animation tick for the current sec/ring setting."""
-    n_rings, _ = _ring_layout(sl_r.val, _layers_from_slider(sl_layers.val))
+    """Layers-peeled advance per animation tick for the current sec/ring setting."""
     ticks_per_ring = sl_speed.val * 1000.0 / _ANIM_TICK_MS
-    return 1.0 / (n_rings * ticks_per_ring)
+    return 1.0 / ticks_per_ring
 
 ax_btn_play  = fig.add_axes([_SL_X, 0.035, 0.12, 0.042])
 ax_btn_reset = fig.add_axes([_SL_X + 0.135, 0.035, 0.12, 0.042])
@@ -488,7 +509,7 @@ def _sync_textboxes() -> None:
     pairs = (
         (tb_speed, f"{sl_speed.val:.3f}"),
         (tb_layers, str(_layers_from_slider(sl_layers.val))),
-        (tb_peel,  f"{sl_peel.val:.3f}"),
+        (tb_peel,  str(int(round(sl_peel.val)))),
         (tb_r,     f"{sl_r.val:.2f}"),
     )
     for tb, s in pairs:
@@ -504,13 +525,14 @@ def _clear() -> None:
     _artists.clear()
 
 
-def _draw(r: float, peel: float, n_layers: int,
+def _draw(r: float, peeled: float, n_layers: int,
           show_labels: bool, show_hint: bool, show_triangle: bool) -> None:
     n_rings, dr = _ring_layout(r, n_layers)
     circ = 2 * math.pi * r
     area = math.pi * r * r
     bar_h = dr * 0.96
     edge_lw = max(0.15, min(1.2, dr / r * 8.0))
+    peel_frac = peeled / n_rings if n_rings else 0.0
 
     # layout: circle above, triangle below
     tri_top    = 0.0
@@ -524,7 +546,7 @@ def _draw(r: float, peel: float, n_layers: int,
     ax.set_xlim(-pad_x, pad_x)
     ax.set_ylim(tri_bottom - 1.4, title_y + 0.45)
 
-    n_done = peel * n_rings
+    n_done = max(0.0, min(float(n_rings), peeled))
 
     # ── peeled / peeling rings ────────────────────────────────────────────────
     for i in range(n_rings):
@@ -596,7 +618,7 @@ def _draw(r: float, peel: float, n_layers: int,
         _artists.append(patch)
 
     # outer circle + triangle outlines (same style, toggled together)
-    tri_alpha = 0.45 + 0.55 * min(max(peel, 0.0) / 0.20, 1.0)
+    tri_alpha = 0.45 + 0.55 * min(max(peel_frac, 0.0) / 0.20, 1.0)
     if show_triangle:
         circ_kw = dict(
             fill=False, edgecolor="#DC2626", linewidth=1.4,
@@ -639,7 +661,7 @@ def _draw(r: float, peel: float, n_layers: int,
                                 fontsize=14, fontweight="bold", zorder=8))
 
         # triangle height
-        if peel > 0.15:
+        if peel_frac > 0.15:
             _artists.append(ax.annotate(
                 "", xy=(cx - circ / 2 - 0.35, tri_top),
                 xytext=(cx - circ / 2 - 0.35, tri_bottom),
@@ -651,7 +673,7 @@ def _draw(r: float, peel: float, n_layers: int,
                                     fontsize=14, fontweight="bold", zorder=8))
 
         # base 2πr when mostly peeled
-        if peel > 0.75:
+        if peel_frac > 0.75:
             _artists.append(ax.annotate(
                 "", xy=(cx - circ / 2, tri_bottom - 0.35),
                 xytext=(cx + circ / 2, tri_bottom - 0.35),
@@ -665,12 +687,12 @@ def _draw(r: float, peel: float, n_layers: int,
         # title (data coords — fixed gap above circle top)
         _title_kw = dict(ha="center", va="bottom", fontsize=18,
                          fontweight="bold", zorder=8)
-        if peel < 0.08:
+        if peel_frac < 0.08:
             _artists.append(ax.text(
                 cx, title_y, "Circle of radius  r",
                 color=_C_INK, **_title_kw,
             ))
-        elif peel > 0.92:
+        elif peel_frac > 0.92:
             _artists.append(ax.text(
                 cx, title_y, "Same area → triangle!",
                 color="#15803D", **_title_kw,
@@ -684,11 +706,12 @@ def _draw(r: float, peel: float, n_layers: int,
     fig.canvas.draw_idle()
 
 
-def _update_readout(r: float, peel: float, n_layers: int) -> None:
+def _update_readout(r: float, peeled: float, n_layers: int) -> None:
     circ = 2 * math.pi * r
     area = math.pi * r * r
     n_rings, dr = _ring_layout(r, n_layers)
     frac = dr / r
+    peel_frac = peeled / n_rings if n_rings else 0.0
 
     _rd_r.set_text(f"{r:.2f}")
     _rd_c.set_text(f"{circ:.2f}")
@@ -698,10 +721,10 @@ def _update_readout(r: float, peel: float, n_layers: int) -> None:
     _rd_n.set_text(f"{n_rings}")
     _rd_d.set_text(f"{frac:.3f}")
 
-    if peel < 0.05:
+    if peel_frac < 0.05:
         _rd_step1.set_color(_C_LABEL)
         _rd_step2.set_color(_C_LABEL)
-    elif peel < 0.95:
+    elif peel_frac < 0.95:
         _rd_step1.set_color(_C_C)
         _rd_step2.set_color(_C_LABEL)
     else:
@@ -715,16 +738,17 @@ def _update_readout(r: float, peel: float, n_layers: int) -> None:
 
 def _refresh(_=None) -> None:
     r        = sl_r.val
-    peel     = sl_peel.val
-    n_layers = _layers_from_slider(sl_layers.val)
+    n_layers = _current_layer_count()
+    _set_peel_slider_max(n_layers)
+    peeled   = sl_peel.val
     show_labels, show_hint, show_triangle = checks.get_status()
 
     if not _textbox_typing():
         _sync_textboxes()
 
     _clear()
-    _draw(r, peel, n_layers, show_labels, show_hint, show_triangle)
-    _update_readout(r, peel, n_layers)
+    _draw(r, peeled, n_layers, show_labels, show_hint, show_triangle)
+    _update_readout(r, peeled, n_layers)
 
 
 def _on_tb_speed(text: str) -> None:
@@ -751,7 +775,9 @@ def _on_tb_peel(text: str) -> None:
     if _suppress_tb:
         return
     try:
-        sl_peel.set_val(max(0.0, min(1.0, float(text))))
+        n = int(round(float(text)))
+        n = max(0, min(_current_layer_count(), n))
+        sl_peel.set_val(float(n))
     except ValueError:
         _sync_textboxes()
 
@@ -778,9 +804,10 @@ def _toggle_anim(_=None) -> None:
 def _run_anim() -> None:
     if not _anim_active:
         return
+    n_max = _current_layer_count()
     nxt = sl_peel.val + _anim_step()
-    if nxt >= 1.0:
-        nxt = 1.0
+    if nxt >= n_max:
+        nxt = float(n_max)
         globals()["_anim_active"] = False
         btn_play.label.set_text("▶  Peel")
         btn_play.ax.set_facecolor("#BFDBFE")

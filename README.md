@@ -140,7 +140,7 @@ Each slider row is **slider → text box → label**. Type a number in the dark 
 
 #### Live readout panel
 
-Tracks **N** (dots thrown), **H** (inside circle), ratio **p = H/N**, estimate **π̂ = 4p**, error **|π̂ − π|**, percent deviation **|π̂ − π| / π**, and the formula **π ≈ 4 × H/N**.
+Tracks **N** (dots thrown), **H** (inside circle), ratio **p = H/N**, estimate **π̂ = 4p**, error **|π̂ − π|**, percent deviation **|π̂ − π| / π** (colour-coded vs the band), expected **±1σ** wobble at the current **N**, and the formula **π ≈ 4 × H/N**. The footer explains whether the current deviation is within normal random fluctuation.
 
 **Concepts:** area ratio, random sampling, Monte Carlo estimation, how more dots improve the estimate.
 
